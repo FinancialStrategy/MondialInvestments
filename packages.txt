@@ -1,4 +1,4 @@
-libta-lib0
-ta-lib
+gcc
+g++
 build-essential
 python3-dev
