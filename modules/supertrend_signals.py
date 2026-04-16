@@ -366,4 +366,130 @@ class SupertrendAnalyzer:
         
         st.subheader("📊 Strategy Performance Dashboard")
         
-        #
+        # Key metrics in columns
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Trades", metrics['Total Trades'])
+            st.metric("Buy Signals", metrics['Buy Signals'])
+            st.metric("Sell Signals", metrics['Sell Signals'])
+        
+        with col2:
+            st.metric("Win Rate", f"{metrics['Win Rate']:.2%}")
+            st.metric("Avg Trade Return", f"{metrics['Average Trade Return']:.2%}")
+            st.metric("Total Days", metrics['Total Days'])
+        
+        with col3:
+            st.metric("Strategy Return", f"{metrics['Strategy Total Return']:.2%}")
+            st.metric("Buy & Hold Return", f"{metrics['Buy & Hold Return']:.2%}")
+            delta_color = "normal" if metrics['Strategy Alpha'] > 0 else "inverse"
+            st.metric("Strategy Alpha", f"{metrics['Strategy Alpha']:.2%}", delta_color=delta_color)
+        
+        with col4:
+            st.metric("Sharpe Ratio", f"{metrics['Sharpe Ratio']:.2f}")
+            st.metric("Max Drawdown", f"{metrics['Max Drawdown']:.2%}")
+        
+        # Trade analysis
+        st.subheader("📈 Trade Analysis")
+        
+        # Extract individual trades
+        trades = []
+        entry_price = None
+        entry_date = None
+        
+        for i in range(len(self.signals)):
+            if self.signals['Signal'].iloc[i] == 1:
+                entry_price = self.signals['Close'].iloc[i]
+                entry_date = self.signals.index[i]
+            elif self.signals['Signal'].iloc[i] == -1 and entry_price is not None:
+                exit_price = self.signals['Close'].iloc[i]
+                exit_date = self.signals.index[i]
+                trade_return = (exit_price - entry_price) / entry_price
+                holding_days = (exit_date - entry_date).days if exit_date and entry_date else 0
+                
+                trades.append({
+                    'Entry Date': entry_date.strftime('%Y-%m-%d') if entry_date else '',
+                    'Exit Date': exit_date.strftime('%Y-%m-%d') if exit_date else '',
+                    'Entry Price': f"{entry_price:.2f}",
+                    'Exit Price': f"{exit_price:.2f}",
+                    'Return': f"{trade_return:.2%}",
+                    'Holding Days': holding_days,
+                    'Outcome': '✅ WIN' if trade_return > 0 else '❌ LOSS'
+                })
+                entry_price = None
+        
+        if trades:
+            trades_df = pd.DataFrame(trades)
+            st.dataframe(trades_df, use_container_width=True)
+            
+            # Download button for trades
+            csv = trades_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Trade Log",
+                data=csv,
+                file_name=f"supertrend_trades_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime='text/csv'
+            )
+        else:
+            st.info("No completed trades found in the analysis period.")
+
+
+def scan_multiple_stocks(tickers: list, df_dict: dict, period: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
+    """
+    Scan multiple stocks for Supertrend signals
+    
+    Returns:
+    DataFrame with current signals for all stocks
+    """
+    results = []
+    
+    for ticker in tickers:
+        if ticker in df_dict:
+            df = df_dict[ticker]
+            if len(df) > period:
+                try:
+                    analyzer = SupertrendAnalyzer(period, multiplier)
+                    signals = analyzer.generate_signals(df)
+                    
+                    latest_trend = signals['Trend'].iloc[-1]
+                    latest_price = signals['Close'].iloc[-1]
+                    latest_supertrend = signals['Supertrend'].iloc[-1]
+                    
+                    # Calculate distance
+                    if latest_trend == 1:
+                        distance = ((latest_price - latest_supertrend) / latest_supertrend * 100)
+                    else:
+                        distance = ((latest_supertrend - latest_price) / latest_supertrend * 100)
+                    
+                    # Determine action
+                    if latest_trend == 1:
+                        last_signal = signals[signals['Signal'] != 0].iloc[-1] if len(signals[signals['Signal'] != 0]) > 0 else None
+                        if last_signal is not None and last_signal['Signal'] == 1:
+                            action = "🚀 BUY"
+                            color = "🟢"
+                        else:
+                            action = "✅ HOLD"
+                            color = "🟢"
+                    else:
+                        last_signal = signals[signals['Signal'] != 0].iloc[-1] if len(signals[signals['Signal'] != 0]) > 0 else None
+                        if last_signal is not None and last_signal['Signal'] == -1:
+                            action = "🔻 SELL"
+                            color = "🔴"
+                        else:
+                            action = "⚠️ AVOID"
+                            color = "🔴"
+                    
+                    results.append({
+                        'Ticker': ticker,
+                        'Signal': color,
+                        'Action': action,
+                        'Current Price': f"{latest_price:.2f}",
+                        'Supertrend': f"{latest_supertrend:.2f}",
+                        'Trend': 'UPTREND' if latest_trend == 1 else 'DOWNTREND',
+                        'Distance %': f"{distance:.1f}%",
+                        'Volatility': f"{signals['ATR'].iloc[-1] / latest_price:.2%}"
+                    })
+                except Exception as e:
+                    print(f"Error analyzing {ticker}: {e}")
+    
+    return pd.DataFrame(results)
