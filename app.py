@@ -2,7 +2,18 @@
 Global Equity Analytics Platform
 Professional Multi-Market Portfolio Analysis Dashboard
 """
+# app.py - en üst satırlara ekleyin
+import sys
+import warnings
+warnings.filterwarnings('ignore')
 
+# TA-Lib kontrolü - eğer yoksa hata vermesin
+try:
+    import talib
+    TA_LIB_AVAILABLE = True
+except ImportError:
+    TA_LIB_AVAILABLE = False
+    print("TA-Lib not available, using manual implementations")
 import streamlit as st
 import pandas as pd
 import numpy as np
