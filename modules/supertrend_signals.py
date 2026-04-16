@@ -1,6 +1,6 @@
 """
 Supertrend Indicator with Buy/Sell Signal Generation
-Professional Trading Strategy Module
+Professional Trading Strategy Module - No TA-Lib Required
 """
 
 import pandas as pd
@@ -26,25 +26,25 @@ class SupertrendAnalyzer:
         self.df = None
         self.signals = None
         
+    def calculate_atr(self, df: pd.DataFrame) -> pd.Series:
+        """Calculate ATR without TA-Lib"""
+        high_low = df['High'] - df['Low']
+        high_close = abs(df['High'] - df['Close'].shift())
+        low_close = abs(df['Low'] - df['Close'].shift())
+        
+        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        atr = tr.rolling(window=self.period).mean()
+        
+        return atr
+        
     def calculate_supertrend(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate Supertrend indicator
-        
-        Formula:
-        Basic Upper Band = (High + Low) / 2 + multiplier * ATR
-        Basic Lower Band = (High + Low) / 2 - multiplier * ATR
         """
-        
         df_copy = df.copy()
         
-        # Calculate ATR (Average True Range)
-        high_low = df_copy['High'] - df_copy['Low']
-        high_close = abs(df_copy['High'] - df_copy['Close'].shift())
-        low_close = abs(df_copy['Low'] - df_copy['Close'].shift())
-        
-        ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        true_range = np.max(ranges, axis=1)
-        df_copy['ATR'] = true_range.rolling(window=self.period).mean()
+        # Calculate ATR
+        df_copy['ATR'] = self.calculate_atr(df_copy)
         
         # Calculate Basic Bands
         hl_avg = (df_copy['High'] + df_copy['Low']) / 2
@@ -84,12 +84,7 @@ class SupertrendAnalyzer:
         return df_copy
     
     def generate_signals(self, df: pd.DataFrame = None) -> pd.DataFrame:
-        """
-        Generate Buy and Sell signals based on Supertrend
-        
-        Buy Signal: When Trend changes from -1 to 1 (downtrend to uptrend)
-        Sell Signal: When Trend changes from 1 to -1 (uptrend to downtrend)
-        """
+        """Generate Buy and Sell signals based on Supertrend"""
         if df is not None:
             self.calculate_supertrend(df)
         elif self.df is None:
@@ -118,7 +113,7 @@ class SupertrendAnalyzer:
         # Calculate position (for backtesting)
         signals_df['Position'] = signals_df['Signal'].replace(to_replace=0, method='ffill').fillna(0)
         
-        # Calculate returns if position is held
+        # Calculate returns
         signals_df['Strategy_Returns'] = signals_df['Close'].pct_change() * signals_df['Position'].shift(1)
         signals_df['Buy_Hold_Returns'] = signals_df['Close'].pct_change()
         
@@ -141,13 +136,11 @@ class SupertrendAnalyzer:
         # Calculate trade returns
         trade_returns = []
         entry_price = 0
-        entry_date = None
         
         for i in range(len(self.signals)):
-            if self.signals['Signal'].iloc[i] == 1:  # Buy signal
+            if self.signals['Signal'].iloc[i] == 1:
                 entry_price = self.signals['Close'].iloc[i]
-                entry_date = self.signals.index[i]
-            elif self.signals['Signal'].iloc[i] == -1 and entry_price > 0:  # Sell signal
+            elif self.signals['Signal'].iloc[i] == -1 and entry_price > 0:
                 exit_price = self.signals['Close'].iloc[i]
                 trade_return = (exit_price - entry_price) / entry_price
                 trade_returns.append(trade_return)
@@ -186,10 +179,10 @@ class SupertrendAnalyzer:
         
         return metrics
     
-    def create_signal_chart(self, title: str = "Supertrend Strategy - Buy/Sell Signals") -> go.Figure:
+    def create_signal_chart(self, title: str = "Supertrend Strategy") -> go.Figure:
         """Create interactive chart with Supertrend and signals"""
         if self.signals is None:
-            raise ValueError("Please generate signals first using generate_signals()")
+            raise ValueError("Please generate signals first")
         
         fig = make_subplots(
             rows=3, cols=1,
@@ -199,16 +192,13 @@ class SupertrendAnalyzer:
             subplot_titles=(title, "Supertrend & Trend", "Cumulative Returns Comparison")
         )
         
-        # Price and Candlestick
+        # Price line
         fig.add_trace(
-            go.Candlestick(
+            go.Scatter(
                 x=self.signals.index,
-                open=self.signals['Open'],
-                high=self.signals['High'],
-                low=self.signals['Low'],
-                close=self.signals['Close'],
-                name='OHLC',
-                showlegend=True
+                y=self.signals['Close'],
+                name='Close Price',
+                line=dict(color='blue', width=1.5)
             ),
             row=1, col=1
         )
@@ -225,7 +215,7 @@ class SupertrendAnalyzer:
             row=1, col=1
         )
         
-        # Buy signals (green triangles)
+        # Buy signals
         buy_signals = self.signals[self.signals['Signal'] == 1]
         if not buy_signals.empty:
             fig.add_trace(
@@ -234,19 +224,13 @@ class SupertrendAnalyzer:
                     y=buy_signals['Close'],
                     mode='markers',
                     name='Buy Signal',
-                    marker=dict(
-                        symbol='triangle-up',
-                        size=14,
-                        color='green',
-                        line=dict(color='darkgreen', width=1)
-                    ),
-                    text=[f'BUY at {price:.2f}' for price in buy_signals['Close']],
-                    hoverinfo='text+x+y'
+                    marker=dict(symbol='triangle-up', size=14, color='green'),
+                    text=[f'BUY at {price:.2f}' for price in buy_signals['Close']]
                 ),
                 row=1, col=1
             )
         
-        # Sell signals (red triangles)
+        # Sell signals
         sell_signals = self.signals[self.signals['Signal'] == -1]
         if not sell_signals.empty:
             fig.add_trace(
@@ -255,19 +239,13 @@ class SupertrendAnalyzer:
                     y=sell_signals['Close'],
                     mode='markers',
                     name='Sell Signal',
-                    marker=dict(
-                        symbol='triangle-down',
-                        size=14,
-                        color='red',
-                        line=dict(color='darkred', width=1)
-                    ),
-                    text=[f'SELL at {price:.2f}' for price in sell_signals['Close']],
-                    hoverinfo='text+x+y'
+                    marker=dict(symbol='triangle-down', size=14, color='red'),
+                    text=[f'SELL at {price:.2f}' for price in sell_signals['Close']]
                 ),
                 row=1, col=1
             )
         
-        # Trend indicator with colored background
+        # Trend background
         for i in range(len(self.signals) - 1):
             if self.signals['Trend'].iloc[i] == 1:
                 fillcolor = 'rgba(46, 204, 113, 0.15)'
@@ -283,37 +261,7 @@ class SupertrendAnalyzer:
                 row=2, col=1
             )
         
-        # Trend line
-        fig.add_trace(
-            go.Scatter(
-                x=self.signals.index,
-                y=self.signals['Supertrend'],
-                name='Supertrend',
-                line=dict(color='purple', width=2),
-                showlegend=False
-            ),
-            row=2, col=1
-        )
-        
-        # Trend annotation
-        latest_trend = self.signals['Trend'].iloc[-1]
-        trend_text = "🟢 UPTREND" if latest_trend == 1 else "🔴 DOWNTREND"
-        trend_color = "#2ECC71" if latest_trend == 1 else "#E74C3C"
-        
-        fig.add_annotation(
-            x=self.signals.index[len(self.signals)//2],
-            y=self.signals['Supertrend'].max(),
-            text=trend_text,
-            showarrow=False,
-            font=dict(size=14, color="white", weight="bold"),
-            bgcolor=trend_color,
-            bordercolor="black",
-            borderwidth=1,
-            borderpad=5,
-            row=2, col=1
-        )
-        
-        # Cumulative returns comparison
+        # Cumulative returns
         fig.add_trace(
             go.Scatter(
                 x=self.signals.index,
@@ -328,35 +276,23 @@ class SupertrendAnalyzer:
             go.Scatter(
                 x=self.signals.index,
                 y=self.signals['Cumulative_BuyHold'],
-                name='Buy & Hold Returns',
+                name='Buy & Hold',
                 line=dict(color='gray', width=2, dash='dash')
             ),
             row=3, col=1
         )
         
-        # Layout updates
         fig.update_layout(
-            title_x=0.5,
             height=900,
             template='plotly_white',
             hovermode='x unified',
             showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         
         fig.update_yaxes(title_text="Price", row=1, col=1)
-        fig.update_yaxes(title_text="Supertrend", row=2, col=1)
+        fig.update_yaxes(title_text="Trend", row=2, col=1)
         fig.update_yaxes(title_text="Cumulative Returns", tickformat=".0%", row=3, col=1)
-        fig.update_xaxes(title_text="Date", row=3, col=1)
-        
-        # Disable rangeslider for candlestick
-        fig.update_layout(xaxis_rangeslider_visible=False)
         
         return fig
     
@@ -364,35 +300,25 @@ class SupertrendAnalyzer:
         """Create Streamlit dashboard for performance metrics"""
         metrics = self.calculate_performance_metrics()
         
-        st.subheader("📊 Strategy Performance Dashboard")
-        
-        # Key metrics in columns
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             st.metric("Total Trades", metrics['Total Trades'])
-            st.metric("Buy Signals", metrics['Buy Signals'])
-            st.metric("Sell Signals", metrics['Sell Signals'])
+            st.metric("Win Rate", f"{metrics['Win Rate']:.2%}")
         
         with col2:
-            st.metric("Win Rate", f"{metrics['Win Rate']:.2%}")
-            st.metric("Avg Trade Return", f"{metrics['Average Trade Return']:.2%}")
-            st.metric("Total Days", metrics['Total Days'])
+            st.metric("Strategy Return", f"{metrics['Strategy Total Return']:.2%}")
+            st.metric("Buy & Hold", f"{metrics['Buy & Hold Return']:.2%}")
         
         with col3:
-            st.metric("Strategy Return", f"{metrics['Strategy Total Return']:.2%}")
-            st.metric("Buy & Hold Return", f"{metrics['Buy & Hold Return']:.2%}")
-            delta_color = "normal" if metrics['Strategy Alpha'] > 0 else "inverse"
-            st.metric("Strategy Alpha", f"{metrics['Strategy Alpha']:.2%}", delta_color=delta_color)
+            st.metric("Strategy Alpha", f"{metrics['Strategy Alpha']:.2%}")
+            st.metric("Sharpe Ratio", f"{metrics['Sharpe Ratio']:.2f}")
         
         with col4:
-            st.metric("Sharpe Ratio", f"{metrics['Sharpe Ratio']:.2f}")
             st.metric("Max Drawdown", f"{metrics['Max Drawdown']:.2%}")
+            st.metric("Avg Trade Return", f"{metrics['Average Trade Return']:.2%}")
         
-        # Trade analysis
-        st.subheader("📈 Trade Analysis")
-        
-        # Extract individual trades
+        # Trade log
         trades = []
         entry_price = None
         entry_date = None
@@ -405,42 +331,25 @@ class SupertrendAnalyzer:
                 exit_price = self.signals['Close'].iloc[i]
                 exit_date = self.signals.index[i]
                 trade_return = (exit_price - entry_price) / entry_price
-                holding_days = (exit_date - entry_date).days if exit_date and entry_date else 0
+                holding_days = (exit_date - entry_date).days
                 
                 trades.append({
-                    'Entry Date': entry_date.strftime('%Y-%m-%d') if entry_date else '',
-                    'Exit Date': exit_date.strftime('%Y-%m-%d') if exit_date else '',
+                    'Entry Date': entry_date.strftime('%Y-%m-%d'),
+                    'Exit Date': exit_date.strftime('%Y-%m-%d'),
                     'Entry Price': f"{entry_price:.2f}",
                     'Exit Price': f"{exit_price:.2f}",
                     'Return': f"{trade_return:.2%}",
-                    'Holding Days': holding_days,
-                    'Outcome': '✅ WIN' if trade_return > 0 else '❌ LOSS'
+                    'Holding Days': holding_days
                 })
                 entry_price = None
         
         if trades:
-            trades_df = pd.DataFrame(trades)
-            st.dataframe(trades_df, use_container_width=True)
-            
-            # Download button for trades
-            csv = trades_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Trade Log",
-                data=csv,
-                file_name=f"supertrend_trades_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime='text/csv'
-            )
-        else:
-            st.info("No completed trades found in the analysis period.")
+            st.subheader("📋 Trade Log")
+            st.dataframe(pd.DataFrame(trades), use_container_width=True)
 
 
 def scan_multiple_stocks(tickers: list, df_dict: dict, period: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
-    """
-    Scan multiple stocks for Supertrend signals
-    
-    Returns:
-    DataFrame with current signals for all stocks
-    """
+    """Scan multiple stocks for Supertrend signals"""
     results = []
     
     for ticker in tickers:
@@ -455,41 +364,19 @@ def scan_multiple_stocks(tickers: list, df_dict: dict, period: int = 10, multipl
                     latest_price = signals['Close'].iloc[-1]
                     latest_supertrend = signals['Supertrend'].iloc[-1]
                     
-                    # Calculate distance
                     if latest_trend == 1:
-                        distance = ((latest_price - latest_supertrend) / latest_supertrend * 100)
+                        action = "🟢 BUY" if signals['Signal'].iloc[-1] == 1 else "✅ HOLD"
                     else:
-                        distance = ((latest_supertrend - latest_price) / latest_supertrend * 100)
-                    
-                    # Determine action
-                    if latest_trend == 1:
-                        last_signal = signals[signals['Signal'] != 0].iloc[-1] if len(signals[signals['Signal'] != 0]) > 0 else None
-                        if last_signal is not None and last_signal['Signal'] == 1:
-                            action = "🚀 BUY"
-                            color = "🟢"
-                        else:
-                            action = "✅ HOLD"
-                            color = "🟢"
-                    else:
-                        last_signal = signals[signals['Signal'] != 0].iloc[-1] if len(signals[signals['Signal'] != 0]) > 0 else None
-                        if last_signal is not None and last_signal['Signal'] == -1:
-                            action = "🔻 SELL"
-                            color = "🔴"
-                        else:
-                            action = "⚠️ AVOID"
-                            color = "🔴"
+                        action = "🔴 SELL" if signals['Signal'].iloc[-1] == -1 else "⚠️ AVOID"
                     
                     results.append({
                         'Ticker': ticker,
-                        'Signal': color,
                         'Action': action,
-                        'Current Price': f"{latest_price:.2f}",
+                        'Price': f"{latest_price:.2f}",
                         'Supertrend': f"{latest_supertrend:.2f}",
-                        'Trend': 'UPTREND' if latest_trend == 1 else 'DOWNTREND',
-                        'Distance %': f"{distance:.1f}%",
-                        'Volatility': f"{signals['ATR'].iloc[-1] / latest_price:.2%}"
+                        'Trend': 'UPTREND' if latest_trend == 1 else 'DOWNTREND'
                     })
                 except Exception as e:
-                    print(f"Error analyzing {ticker}: {e}")
+                    print(f"Error: {e}")
     
     return pd.DataFrame(results)
