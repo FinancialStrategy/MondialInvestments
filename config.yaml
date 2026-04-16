@@ -1,0 +1,62 @@
+indices:
+  Turkey:
+    name: "BIST 100"
+    currency: "TRY"
+    market: "turkish"
+    tickers: ["THYAO", "GARAN", "AKBNK", "YKBNK", "ASELS", "KCHOL", "SISE", "PGSUS", "TOASO", "EREGL"]
+    benchmark: "^XU100"
+    
+  USA:
+    name: "S&P 500"
+    currency: "USD"
+    market: "us"
+    tickers: ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "JPM", "V", "JNJ"]
+    benchmark: "^GSPC"
+    
+  Germany:
+    name: "DAX 40"
+    currency: "EUR"
+    market: "german"
+    tickers: ["SAP.DE", "SIE.DE", "ALV.DE", "DTE.DE", "MRK.DE", "BAS.DE", "BAYN.DE", "DBK.DE"]
+    benchmark: "^GDAXI"
+    
+  France:
+    name: "CAC 40"
+    currency: "EUR"
+    market: "french"
+    tickers: ["MC.PA", "TTE.PA", "SAN.PA", "BNP.PA", "OR.PA", "AIR.PA", "SU.PA", "DANO.PA"]
+    benchmark: "^FCHI"
+    
+  Italy:
+    name: "FTSE MIB"
+    currency: "EUR"
+    market: "italian"
+    tickers: ["ENEL.MI", "ENI.MI", "UCG.MI", "ISP.MI", "STLAM.MI", "TIT.MI", "MB.MI"]
+    benchmark: "FTSEMIB.MI"
+    
+  Switzerland:
+    name: "SMI"
+    currency: "CHF"
+    market: "swiss"
+    tickers: ["NESN.SW", "NOVN.SW", "ROG.SW", "UBSG.SW", "ABBN.SW", "CFR.SW", "SCMN.SW"]
+    benchmark: "^SSMI"
+    
+  Japan:
+    name: "Nikkei 225"
+    currency: "JPY"
+    market: "japanese"
+    tickers: ["7203.T", "9984.T", "6758.T", "9432.T", "6861.T", "4063.T", "8306.T"]
+    benchmark: "^N225"
+    
+  Australia:
+    name: "ASX 200"
+    currency: "AUD"
+    market: "australian"
+    tickers: ["CBA.AX", "BHP.AX", "CSL.AX", "WBC.AX", "NAB.AX", "ANZ.AX", "WES.AX"]
+    benchmark: "^AXJO"
+
+# Global settings
+settings:
+  default_period_days: 730  # 2 years
+  risk_free_rate: 0.02  # 2%
+  trading_days_per_year: 252
