@@ -1,0 +1,175 @@
+/* Professional Corporate Dashboard Styling */
+/* Global Equity Analytics Platform */
+
+/* Main container */
+.main {
+    padding: 0rem 1rem;
+}
+
+/* Headers */
+h1 {
+    color: #1E3A5F;
+    border-bottom: 3px solid #2E86C1;
+    padding-bottom: 0.5rem;
+    font-weight: 700;
+}
+
+h2 {
+    color: #2C3E50;
+    font-weight: 600;
+    margin-top: 1rem;
+}
+
+h3 {
+    color: #34495E;
+    font-weight: 500;
+}
+
+/* Metric cards */
+.stMetric {
+    background: linear-gradient(135deg, #F8F9FA 0%, #E9ECEF 100%);
+    border-radius: 12px;
+    padding: 1.2rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border-left: 4px solid #2E86C1;
+    transition: transform 0.2s;
+}
+
+.stMetric:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+
+/* Sidebar */
+.css-1d391kg {
+    background: linear-gradient(180deg, #F0F2F6 0%, #E8EAED 100%);
+}
+
+.sidebar .sidebar-content {
+    background-color: #F0F2F6;
+}
+
+/* DataFrames */
+.stDataFrame {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 1.5rem;
+    background-color: #F8F9FA;
+    padding: 0.75rem;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: 8px;
+    padding: 0.6rem 1.2rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, #2E86C1 0%, #1E5A8A 100%);
+    color: white;
+    box-shadow: 0 2px 4px rgba(46,134,193,0.3);
+}
+
+/* Buttons */
+.stButton > button {
+    background: linear-gradient(135deg, #2E86C1 0%, #1E5A8A 100%);
+    color: white;
+    border-radius: 8px;
+    font-weight: 600;
+    transition: all 0.3s;
+    border: none;
+    padding: 0.6rem 1.2rem;
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(46,134,193,0.4);
+}
+
+/* Expanders */
+.streamlit-expanderHeader {
+    background-color: #F8F9FA;
+    border-radius: 8px;
+    font-weight: 600;
+    border-left: 3px solid #2E86C1;
+}
+
+/* Progress bar */
+.stProgress > div > div {
+    background: linear-gradient(90deg, #2E86C1 0%, #1ABC9C 100%);
+}
+
+/* Info/Warning/Success boxes */
+.stAlert {
+    border-radius: 10px;
+    border-left: 4px solid;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #F1F1F1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Plotly charts */
+.js-plotly-plot .plotly .main-svg {
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+/* Download buttons */
+.download-button {
+    background-color: #27AE60;
+    color: white;
+}
+
+/* Loading spinner */
+.stSpinner > div {
+    border-top-color: #2E86C1;
+}
+
+/* Code blocks */
+code {
+    background-color: #F0F2F6;
+    border-radius: 4px;
+    padding: 0.2rem 0.4rem;
+    font-family: 'Courier New', monospace;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .stMetric {
+        padding: 0.8rem;
+    }
+    
+    h1 {
+        font-size: 1.8rem;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.9rem;
+    }
+}
