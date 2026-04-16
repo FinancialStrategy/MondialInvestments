@@ -47,6 +47,26 @@ h1 {
 </style>
 """, unsafe_allow_html=True)
 
+# Initialize session state variables
+if 'run_analysis' not in st.session_state:
+    st.session_state['run_analysis'] = False
+if 'selected_markets' not in st.session_state:
+    st.session_state['selected_markets'] = []
+if 'selected_tickers' not in st.session_state:
+    st.session_state['selected_tickers'] = {}
+if 'start_date' not in st.session_state:
+    st.session_state['start_date'] = datetime.now().date() - timedelta(days=730)
+if 'end_date' not in st.session_state:
+    st.session_state['end_date'] = datetime.now().date()
+if 'total_selected' not in st.session_state:
+    st.session_state['total_selected'] = 0
+if 'supertrend_params' not in st.session_state:
+    st.session_state['supertrend_params'] = {
+        'enabled': True,
+        'period': 10,
+        'multiplier': 3.0
+    }
+
 # Title
 st.title("📊 Global Equity Analytics Platform")
 st.markdown("---")
@@ -79,15 +99,6 @@ def calculate_bollinger_bands(prices, period=20, std_dev=2):
     lower = sma - (std * std_dev)
     return upper, sma, lower
 
-def calculate_atr(high, low, close, period=14):
-    """Calculate ATR without TA-Lib"""
-    high_low = high - low
-    high_close = abs(high - close.shift())
-    low_close = abs(low - close.shift())
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr = tr.rolling(window=period).mean()
-    return atr
-
 def calculate_drawdown(returns):
     """Calculate drawdown series"""
     cumulative = (1 + returns).cumprod()
@@ -97,17 +108,11 @@ def calculate_drawdown(returns):
 
 def calculate_sharpe_ratio(returns, risk_free_rate=0.02):
     """Calculate annualized Sharpe ratio"""
+    if returns.empty or returns.std() == 0:
+        return 0
     excess_returns = returns - risk_free_rate / 252
-    sharpe = (excess_returns.mean() / returns.std() * np.sqrt(252)) if returns.std() != 0 else 0
+    sharpe = (excess_returns.mean() / returns.std() * np.sqrt(252))
     return sharpe
-
-def calculate_sortino_ratio(returns, risk_free_rate=0.02):
-    """Calculate Sortino ratio"""
-    excess_returns = returns - risk_free_rate / 252
-    negative_returns = returns[returns < 0]
-    downside_std = negative_returns.std() if len(negative_returns) > 0 else returns.std()
-    sortino = (excess_returns.mean() / downside_std * np.sqrt(252)) if downside_std != 0 else 0
-    return sortino
 
 # ==================== SIDEBAR ====================
 
@@ -130,12 +135,12 @@ if not available_markets:
 selected_markets = st.sidebar.multiselect(
     "🌍 Select Markets",
     options=available_markets,
-    default=available_markets[:3] if len(available_markets) >= 3 else available_markets
+    default=available_markets[:2] if len(available_markets) >= 2 else available_markets
 )
 
 # Date range
 end_date = datetime.now().date()
-start_date = end_date - timedelta(days=730)
+start_date = end_date - timedelta(days=365)  # 1 year for better performance
 
 col1, col2 = st.sidebar.columns(2)
 with col1:
@@ -161,7 +166,7 @@ for market in selected_markets:
             selected = st.multiselect(
                 f"Select stocks",
                 options=market_tickers,
-                default=market_tickers[:4] if len(market_tickers) >= 4 else market_tickers,
+                default=market_tickers[:2] if len(market_tickers) >= 2 else market_tickers,
                 key=f"{market}_selector"
             )
             if selected:
@@ -197,7 +202,6 @@ if st.sidebar.button("🚀 Run Analysis", type="primary", use_container_width=Tr
 # ==================== MAIN CONTENT ====================
 
 if st.session_state.get('run_analysis', False):
-    from modules.data_loader import fetch_market_data
     
     selected_markets = st.session_state['selected_markets']
     selected_tickers_dict = st.session_state['selected_tickers']
@@ -215,44 +219,61 @@ if st.session_state.get('run_analysis', False):
     
     all_prices = {}
     all_ohlc_data = {}
-    all_returns = {}
-    progress_bar = st.progress(0)
     
-    for idx, market in enumerate(selected_markets):
+    for market in selected_markets:
         if market in selected_tickers_dict:
             tickers = selected_tickers_dict[market]
-            progress_bar.progress((idx + 0.5) / len(selected_markets))
             
-            ticker_data = fetch_market_data(tickers, str(start_date), str(end_date))
-            
-            if ticker_data:
-                close_prices = {}
-                for ticker, df in ticker_data.items():
-                    if 'Close' in df.columns:
-                        close_prices[ticker] = df['Close']
-                        all_ohlc_data[ticker] = df
-                
-                if close_prices:
-                    prices_df = pd.DataFrame(close_prices)
-                    if not prices_df.empty:
-                        all_prices[market] = prices_df
-                        all_returns[market] = prices_df.pct_change().dropna()
-    
-    progress_bar.progress(1.0)
-    progress_bar.empty()
+            for ticker in tickers:
+                try:
+                    import yfinance as yf
+                    
+                    # Download data with error handling
+                    data = yf.download(
+                        ticker,
+                        start=start_date,
+                        end=end_date,
+                        progress=False,
+                        auto_adjust=True
+                    )
+                    
+                    if not data.empty and 'Close' in data.columns:
+                        # Store close prices
+                        if market not in all_prices:
+                            all_prices[market] = {}
+                        all_prices[market][ticker] = data['Close']
+                        
+                        # Store OHLC data
+                        all_ohlc_data[ticker] = data
+                        
+                except Exception as e:
+                    st.warning(f"Could not load {ticker}: {e}")
     
     if not all_prices:
         st.error("❌ No data loaded. Please check your selections.")
         st.stop()
     
-    # Combine all data
-    combined_prices = pd.concat(all_prices.values(), axis=1).dropna(axis=1, how='all')
-    combined_returns = combined_prices.pct_change().dropna()
+    # Convert to DataFrames
+    for market in all_prices:
+        if all_prices[market]:
+            all_prices[market] = pd.DataFrame(all_prices[market])
     
-    # Equal weight portfolio returns
-    if not combined_returns.empty and len(combined_returns.columns) > 0:
-        portfolio_returns = combined_returns.mean(axis=1)
+    # Combine all prices
+    combined_prices = []
+    for market, df in all_prices.items():
+        if not df.empty:
+            combined_prices.append(df)
+    
+    if combined_prices:
+        combined_prices = pd.concat(combined_prices, axis=1).dropna(axis=1, how='all')
     else:
+        combined_prices = pd.DataFrame()
+    
+    if not combined_prices.empty:
+        combined_returns = combined_prices.pct_change().dropna()
+        portfolio_returns = combined_returns.mean(axis=1) if not combined_returns.empty else pd.Series()
+    else:
+        combined_returns = pd.DataFrame()
         portfolio_returns = pd.Series()
     
     # ==================== TABS ====================
@@ -266,8 +287,8 @@ if st.session_state.get('run_analysis', False):
     with tabs[0]:
         st.header("Market Performance")
         
-        # Normalized price chart
         if not combined_prices.empty:
+            # Normalized price chart
             normalized = combined_prices / combined_prices.iloc[0] * 100
             
             fig = px.line(
@@ -279,7 +300,7 @@ if st.session_state.get('run_analysis', False):
             st.plotly_chart(fig, use_container_width=True)
         
         # Correlation matrix
-        if len(combined_prices.columns) > 1:
+        if len(combined_prices.columns) > 1 and not combined_returns.empty:
             st.subheader("Asset Correlation Matrix")
             corr_matrix = combined_returns.corr()
             
@@ -298,36 +319,19 @@ if st.session_state.get('run_analysis', False):
         st.subheader("Market Summary")
         summary_data = []
         
-        for market, prices in all_prices.items():
-            if not prices.empty:
-                rets = prices.pct_change().dropna()
-                avg_return = rets.mean().mean()
-                avg_vol = rets.std().mean()
-                sharpe = (avg_return / avg_vol * np.sqrt(252)) if avg_vol > 0 else 0
-                
-                summary_data.append({
-                    'Market': market,
-                    'Stocks': len(prices.columns),
-                    'Avg Return': f"{avg_return:.4%}",
-                    'Avg Volatility': f"{avg_vol:.4%}",
-                    'Avg Sharpe': f"{sharpe:.3f}"
-                })
+        for market, df in all_prices.items():
+            if not df.empty:
+                rets = df.pct_change().dropna()
+                if not rets.empty:
+                    summary_data.append({
+                        'Market': market,
+                        'Stocks': len(df.columns),
+                        'Latest Close': f"{df.iloc[-1].mean():.2f}",
+                        'Avg Daily Return': f"{rets.mean().mean():.4%}"
+                    })
         
         if summary_data:
             st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
-        
-        # Returns distribution
-        if not combined_returns.empty:
-            st.subheader("Returns Distribution")
-            fig_hist = px.histogram(
-                combined_returns.stack().reset_index(drop=True),
-                nbins=50,
-                title="Daily Returns Distribution",
-                labels={"value": "Return", "count": "Frequency"}
-            )
-            fig_hist.update_layout(height=400, template='plotly_white')
-            fig_hist.update_xaxis(tickformat=".2%")
-            st.plotly_chart(fig_hist, use_container_width=True)
     
     # ==================== TAB 2: TECHNICAL ANALYSIS ====================
     with tabs[1]:
@@ -335,82 +339,50 @@ if st.session_state.get('run_analysis', False):
         
         if all_ohlc_data:
             all_tickers = list(all_ohlc_data.keys())
-            selected_ticker = st.selectbox("Select Stock for Analysis", all_tickers)
-            
-            if selected_ticker and selected_ticker in all_ohlc_data:
-                df = all_ohlc_data[selected_ticker].copy()
+            if all_tickers:
+                selected_ticker = st.selectbox("Select Stock for Analysis", all_tickers)
                 
-                if not df.empty and 'Close' in df.columns:
-                    # Calculate indicators
-                    df['SMA_20'] = df['Close'].rolling(20).mean()
-                    df['SMA_50'] = df['Close'].rolling(50).mean()
-                    df['SMA_200'] = df['Close'].rolling(200).mean()
-                    df['RSI'] = calculate_rsi(df['Close'])
-                    df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
-                    df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
+                if selected_ticker and selected_ticker in all_ohlc_data:
+                    df = all_ohlc_data[selected_ticker].copy()
                     
-                    macd, signal, hist = calculate_macd(df['Close'])
-                    df['MACD'] = macd
-                    df['MACD_Signal'] = signal
-                    df['MACD_Hist'] = hist
-                    
-                    upper, middle, lower = calculate_bollinger_bands(df['Close'])
-                    df['BB_Upper'] = upper
-                    df['BB_Middle'] = middle
-                    df['BB_Lower'] = lower
-                    
-                    # Create subplot figure
-                    fig = make_subplots(
-                        rows=4, cols=1,
-                        shared_xaxes=True,
-                        vertical_spacing=0.05,
-                        row_heights=[0.4, 0.2, 0.2, 0.2],
-                        subplot_titles=(f"{selected_ticker} - Price", "RSI (14)", "MACD", "Bollinger Bands")
-                    )
-                    
-                    # Price chart with MAs
-                    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='blue')), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name='SMA 20', line=dict(color='orange')), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name='SMA 50', line=dict(color='red')), row=1, col=1)
-                    
-                    # RSI
-                    fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI', line=dict(color='purple')), row=2, col=1)
-                    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-                    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-                    
-                    # MACD
-                    fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name='MACD', line=dict(color='blue')), row=3, col=1)
-                    fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], name='Signal', line=dict(color='red')), row=3, col=1)
-                    
-                    colors = ['green' if v >= 0 else 'red' for v in df['MACD_Hist']]
-                    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name='Histogram', marker_color=colors), row=3, col=1)
-                    
-                    # Bollinger Bands
-                    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='blue')), row=4, col=1)
-                    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], name='BB Upper', line=dict(color='gray', dash='dash')), row=4, col=1)
-                    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], name='BB Lower', line=dict(color='gray', dash='dash')), row=4, col=1)
-                    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Middle'], name='BB Middle', line=dict(color='orange')), row=4, col=1)
-                    
-                    fig.update_layout(height=900, template='plotly_white', showlegend=True)
-                    fig.update_yaxes(title_text="Price", row=1, col=1)
-                    fig.update_yaxes(title_text="RSI", range=[0, 100], row=2, col=1)
-                    fig.update_yaxes(title_text="MACD", row=3, col=1)
-                    fig.update_yaxes(title_text="Price", row=4, col=1)
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Current indicator values
-                    st.subheader("Current Indicator Values")
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("RSI (14)", f"{df['RSI'].iloc[-1]:.1f}")
-                    with col2:
-                        st.metric("SMA 20", f"{df['SMA_20'].iloc[-1]:.2f}")
-                    with col3:
-                        st.metric("SMA 50", f"{df['SMA_50'].iloc[-1]:.2f}")
-                    with col4:
-                        st.metric("MACD", f"{df['MACD'].iloc[-1]:.3f}")
+                    if not df.empty and 'Close' in df.columns:
+                        # Calculate indicators
+                        df['SMA_20'] = df['Close'].rolling(20).mean()
+                        df['SMA_50'] = df['Close'].rolling(50).mean()
+                        df['RSI'] = calculate_rsi(df['Close'])
+                        
+                        # Price chart
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='blue')))
+                        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name='SMA 20', line=dict(color='orange')))
+                        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name='SMA 50', line=dict(color='red')))
+                        
+                        fig.update_layout(
+                            title=f"{selected_ticker} - Price & Moving Averages",
+                            yaxis_title="Price",
+                            height=500,
+                            template='plotly_white'
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # RSI chart
+                        fig_rsi = go.Figure()
+                        fig_rsi.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI', line=dict(color='purple')))
+                        fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
+                        fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
+                        fig_rsi.update_layout(title="RSI (14)", yaxis_title="RSI", height=400, template='plotly_white')
+                        st.plotly_chart(fig_rsi, use_container_width=True)
+                        
+                        # Current values
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Current Price", f"{df['Close'].iloc[-1]:.2f}")
+                        with col2:
+                            st.metric("SMA 20", f"{df['SMA_20'].iloc[-1]:.2f}")
+                        with col3:
+                            st.metric("RSI", f"{df['RSI'].iloc[-1]:.1f}")
+            else:
+                st.warning("No technical data available")
     
     # ==================== TAB 3: PORTFOLIO OPTIMIZATION ====================
     with tabs[2]:
@@ -418,64 +390,39 @@ if st.session_state.get('run_analysis', False):
         
         if len(combined_prices.columns) >= 2:
             try:
-                from modules.portfolio_optimizer import PortfolioOptimizer
+                # Simple equal weight as fallback
+                st.subheader("Equal Weight Portfolio")
                 
-                optimizer = PortfolioOptimizer(combined_prices)
+                weights = {ticker: 1/len(combined_prices.columns) for ticker in combined_prices.columns}
                 
-                # Strategy selection
-                strategy = st.selectbox(
-                    "Optimization Strategy",
-                    ["Max Sharpe Ratio", "Min Volatility", "Max Quadratic Utility"]
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Number of Assets", len(combined_prices.columns))
+                with col2:
+                    if not portfolio_returns.empty:
+                        ret = (1 + portfolio_returns).prod() - 1
+                        st.metric("Portfolio Return", f"{ret:.2%}")
+                with col3:
+                    if not portfolio_returns.empty and portfolio_returns.std() != 0:
+                        sharpe = calculate_sharpe_ratio(portfolio_returns)
+                        st.metric("Sharpe Ratio", f"{sharpe:.3f}")
+                
+                # Weights chart
+                weights_df = pd.DataFrame.from_dict(weights, orient='index', columns=['Weight'])
+                weights_df = weights_df.sort_values('Weight', ascending=False)
+                
+                fig = px.bar(
+                    weights_df,
+                    x=weights_df.index,
+                    y='Weight',
+                    title="Portfolio Weights",
+                    color='Weight',
+                    color_continuous_scale='Viridis'
                 )
+                fig.update_layout(height=500, template='plotly_white')
+                fig.update_yaxis(tickformat='.0%')
+                st.plotly_chart(fig, use_container_width=True)
                 
-                if strategy == "Max Sharpe Ratio":
-                    result = optimizer.optimize_max_sharpe()
-                elif strategy == "Min Volatility":
-                    result = optimizer.optimize_min_volatility()
-                else:
-                    risk_aversion = st.slider("Risk Aversion", 1.0, 10.0, 3.0)
-                    result = optimizer.optimize_max_quadratic_utility(risk_aversion)
-                
-                if result['status'] == 'success' and result['weights']:
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Expected Return", f"{result['expected_return']:.2%}")
-                    with col2:
-                        st.metric("Volatility", f"{result['volatility']:.2%}")
-                    with col3:
-                        st.metric("Sharpe Ratio", f"{result['sharpe_ratio']:.3f}")
-                    
-                    # Weights chart
-                    weights_df = pd.DataFrame.from_dict(result['weights'], orient='index', columns=['Weight'])
-                    weights_df = weights_df[weights_df['Weight'] > 0.01].sort_values('Weight', ascending=False)
-                    
-                    if not weights_df.empty:
-                        fig = px.bar(
-                            weights_df,
-                            x=weights_df.index,
-                            y='Weight',
-                            title="Optimal Portfolio Weights",
-                            color='Weight',
-                            color_continuous_scale='Viridis',
-                            text=weights_df['Weight'].apply(lambda x: f'{x:.1%}')
-                        )
-                        fig.update_layout(height=500, template='plotly_white')
-                        fig.update_yaxis(tickformat='.0%')
-                        fig.update_traces(textposition='outside')
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Download button
-                        csv = weights_df.to_csv().encode('utf-8')
-                        st.download_button(
-                            label="📥 Download Weights",
-                            data=csv,
-                            file_name='portfolio_weights.csv',
-                            mime='text/csv'
-                        )
-                else:
-                    st.warning("Optimization failed. Try different assets.")
-            except ImportError:
-                st.error("Portfolio optimizer module not available")
             except Exception as e:
                 st.error(f"Optimization error: {e}")
         else:
@@ -488,33 +435,29 @@ if st.session_state.get('run_analysis', False):
         if not portfolio_returns.empty:
             # Calculate metrics
             total_return = (1 + portfolio_returns).prod() - 1
-            annual_return = (1 + total_return) ** (252 / len(portfolio_returns)) - 1
             volatility = portfolio_returns.std() * np.sqrt(252)
             sharpe = calculate_sharpe_ratio(portfolio_returns)
-            sortino = calculate_sortino_ratio(portfolio_returns)
             drawdown = calculate_drawdown(portfolio_returns)
             max_drawdown = drawdown.min()
             var_95 = portfolio_returns.quantile(0.05)
-            cvar_95 = portfolio_returns[portfolio_returns <= var_95].mean()
             win_rate = (portfolio_returns > 0).sum() / len(portfolio_returns)
             
             # Display metrics
-            st.subheader("Portfolio Risk Metrics")
-            
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Total Return", f"{total_return:.2%}")
-                st.metric("Annual Return", f"{annual_return:.2%}")
             with col2:
                 st.metric("Volatility", f"{volatility:.2%}")
-                st.metric("Max Drawdown", f"{max_drawdown:.2%}")
             with col3:
                 st.metric("Sharpe Ratio", f"{sharpe:.3f}")
-                st.metric("Sortino Ratio", f"{sortino:.3f}")
             with col4:
-                st.metric("VaR (95%)", f"{var_95:.2%}")
-                st.metric("CVaR (95%)", f"{cvar_95:.2%}")
                 st.metric("Win Rate", f"{win_rate:.2%}")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Max Drawdown", f"{max_drawdown:.2%}")
+            with col2:
+                st.metric("VaR (95%)", f"{var_95:.2%}")
             
             # Drawdown chart
             st.subheader("Drawdown Analysis")
@@ -532,46 +475,17 @@ if st.session_state.get('run_analysis', False):
             fig_dd.add_hline(y=-20, line_dash="dash", line_color="red")
             st.plotly_chart(fig_dd, use_container_width=True)
             
-            # Rolling metrics
-            st.subheader("Rolling Metrics (60-day window)")
-            
-            rolling_sharpe = portfolio_returns.rolling(60).apply(
-                lambda x: (x.mean() / x.std() * np.sqrt(252)) if x.std() != 0 else 0
+            # Returns distribution
+            st.subheader("Returns Distribution")
+            fig_hist = px.histogram(
+                portfolio_returns,
+                nbins=50,
+                title="Daily Returns Distribution",
+                labels={"value": "Return", "count": "Frequency"}
             )
-            rolling_vol = portfolio_returns.rolling(60).std() * np.sqrt(252)
-            
-            fig_roll = make_subplots(rows=2, cols=1, shared_xaxes=True)
-            fig_roll.add_trace(go.Scatter(x=rolling_sharpe.index, y=rolling_sharpe, name='Sharpe'), row=1, col=1)
-            fig_roll.add_trace(go.Scatter(x=rolling_vol.index, y=rolling_vol, name='Volatility'), row=2, col=1)
-            fig_roll.update_layout(height=500, template='plotly_white')
-            fig_roll.update_yaxes(title_text="Sharpe Ratio", row=1, col=1)
-            fig_roll.update_yaxes(title_text="Volatility", tickformat=".2%", row=2, col=1)
-            st.plotly_chart(fig_roll, use_container_width=True)
-            
-            # Monthly returns heatmap
-            st.subheader("Monthly Returns")
-            monthly_returns = portfolio_returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
-            
-            if not monthly_returns.empty:
-                monthly_pivot = pd.DataFrame({
-                    'Year': monthly_returns.index.year,
-                    'Month': monthly_returns.index.month,
-                    'Return': monthly_returns.values
-                }).pivot(index='Year', columns='Month', values='Return')
-                
-                month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-                monthly_pivot.columns = month_names[:len(monthly_pivot.columns)]
-                
-                fig_heat = px.imshow(
-                    monthly_pivot * 100,
-                    text_auto='.1f',
-                    aspect="auto",
-                    color_continuous_scale="RdYlGn",
-                    title="Monthly Returns (%)",
-                    zmin=-10, zmax=10
-                )
-                fig_heat.update_layout(height=500)
-                st.plotly_chart(fig_heat, use_container_width=True)
+            fig_hist.update_layout(height=400, template='plotly_white')
+            fig_hist.update_xaxis(tickformat=".2%")
+            st.plotly_chart(fig_hist, use_container_width=True)
         else:
             st.warning("Insufficient data for risk analysis")
     
@@ -580,59 +494,60 @@ if st.session_state.get('run_analysis', False):
         with tabs[4]:
             st.header("Supertrend Trading Strategy")
             
-            try:
-                from modules.supertrend_signals import SupertrendAnalyzer
-                
-                if all_ohlc_data:
-                    all_tickers = list(all_ohlc_data.keys())
+            if all_ohlc_data:
+                all_tickers = list(all_ohlc_data.keys())
+                if all_tickers:
                     selected = st.selectbox("Select Stock for Supertrend Analysis", all_tickers, key="st_selector")
                     
                     if selected and selected in all_ohlc_data:
-                        df = all_ohlc_data[selected].copy()
-                        
-                        if len(df) > supertrend_params['period']:
-                            analyzer = SupertrendAnalyzer(
-                                period=supertrend_params['period'],
-                                multiplier=supertrend_params['multiplier']
-                            )
-                            signals = analyzer.generate_signals(df)
+                        try:
+                            from modules.supertrend_signals import SupertrendAnalyzer
                             
-                            # Current status
-                            current_trend = signals['Trend'].iloc[-1]
-                            current_price = signals['Close'].iloc[-1]
-                            current_supertrend = signals['Supertrend'].iloc[-1]
+                            df = all_ohlc_data[selected].copy()
                             
-                            col1, col2, col3, col4 = st.columns(4)
-                            with col1:
-                                trend_text = "🟢 UPTREND" if current_trend == 1 else "🔴 DOWNTREND"
-                                st.metric("Current Trend", trend_text)
-                            with col2:
-                                st.metric("Current Price", f"{current_price:.2f}")
-                            with col3:
-                                st.metric("Supertrend", f"{current_supertrend:.2f}")
-                            with col4:
-                                last_signal = signals[signals['Signal'] != 0]
-                                if not last_signal.empty:
-                                    sig = last_signal.iloc[-1]['Signal']
-                                    signal_text = "BUY" if sig == 1 else "SELL"
-                                    st.metric("Last Signal", signal_text)
-                                else:
-                                    st.metric("Last Signal", "None")
-                            
-                            # Chart
-                            fig = analyzer.create_signal_chart(f"{selected}")
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # Performance
-                            analyzer.create_performance_dashboard()
-                        else:
-                            st.warning(f"Insufficient data. Need at least {supertrend_params['period']} days.")
+                            if len(df) > supertrend_params['period']:
+                                analyzer = SupertrendAnalyzer(
+                                    period=supertrend_params['period'],
+                                    multiplier=supertrend_params['multiplier']
+                                )
+                                signals = analyzer.generate_signals(df)
+                                
+                                # Current status
+                                current_trend = signals['Trend'].iloc[-1]
+                                current_price = signals['Close'].iloc[-1]
+                                current_supertrend = signals['Supertrend'].iloc[-1]
+                                
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    trend_text = "🟢 UPTREND" if current_trend == 1 else "🔴 DOWNTREND"
+                                    st.metric("Current Trend", trend_text)
+                                with col2:
+                                    st.metric("Current Price", f"{current_price:.2f}")
+                                with col3:
+                                    st.metric("Supertrend", f"{current_supertrend:.2f}")
+                                with col4:
+                                    last_signal = signals[signals['Signal'] != 0]
+                                    if not last_signal.empty:
+                                        sig = last_signal.iloc[-1]['Signal']
+                                        signal_text = "BUY" if sig == 1 else "SELL"
+                                        st.metric("Last Signal", signal_text)
+                                    else:
+                                        st.metric("Last Signal", "None")
+                                
+                                # Chart
+                                fig = analyzer.create_signal_chart(f"{selected}")
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Performance
+                                analyzer.create_performance_dashboard()
+                            else:
+                                st.warning(f"Insufficient data. Need at least {supertrend_params['period']} days.")
+                        except ImportError:
+                            st.error("Supertrend module not available")
+                        except Exception as e:
+                            st.error(f"Supertrend error: {e}")
                 else:
                     st.info("No stock data available for Supertrend analysis")
-            except ImportError:
-                st.error("Supertrend module not available")
-            except Exception as e:
-                st.error(f"Supertrend error: {e}")
 
 else:
     # Welcome screen
@@ -659,7 +574,7 @@ else:
         st.markdown("""
         - Market Overview & Correlation
         - Technical Indicators (SMA, EMA, RSI, MACD, Bollinger)
-        - Portfolio Optimization (PyPortfolioOpt)
+        - Portfolio Optimization
         - Risk Analytics (Sharpe, Sortino, VaR, Drawdown)
         - Supertrend Trading Strategy
         """)
@@ -671,12 +586,11 @@ else:
         - Performance Metrics
         - Risk Assessment
         - Signal Generation
-        - Download Reports
         """)
     
     st.markdown("---")
-    st.caption("Select markets and stocks from the sidebar to begin analysis.")
+    st.caption("Global Equity Analytics Platform | Data from Yahoo Finance")
 
 # Footer
 st.markdown("---")
-st.caption("Global Equity Analytics Platform | Data from Yahoo Finance")
+st.caption("Select markets and stocks from the sidebar to begin analysis.")
