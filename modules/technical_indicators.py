@@ -1,11 +1,10 @@
 """
-Technical Indicators Module with TA-Lib Integration
-FIXED: make_subplots import issue resolved
+Technical Indicators Module - NO TA-Lib Required
+All indicators implemented manually with numpy/pandas
 """
 
 import pandas as pd
 import numpy as np
-import talib
 import plotly.graph_objects as go
 from typing import Dict
 
@@ -16,79 +15,118 @@ except ImportError:
     import plotly.subplots as sp
     make_subplots = sp.make_subplots
 
+
+def calculate_sma(data: pd.Series, period: int) -> pd.Series:
+    """Simple Moving Average"""
+    return data.rolling(window=period).mean()
+
+
+def calculate_ema(data: pd.Series, period: int) -> pd.Series:
+    """Exponential Moving Average"""
+    return data.ewm(span=period, adjust=False).mean()
+
+
+def calculate_rsi(data: pd.Series, period: int = 14) -> pd.Series:
+    """Relative Strength Index"""
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+
+def calculate_macd(data: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+    """MACD (Moving Average Convergence Divergence)"""
+    ema_fast = calculate_ema(data, fast)
+    ema_slow = calculate_ema(data, slow)
+    macd_line = ema_fast - ema_slow
+    signal_line = calculate_ema(macd_line, signal)
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+def calculate_bollinger_bands(data: pd.Series, period: int = 20, std_dev: int = 2):
+    """Bollinger Bands"""
+    sma = calculate_sma(data, period)
+    std = data.rolling(window=period).std()
+    upper = sma + (std * std_dev)
+    lower = sma - (std * std_dev)
+    return upper, sma, lower
+
+
+def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Average True Range"""
+    high_low = high - low
+    high_close = abs(high - close.shift())
+    low_close = abs(low - close.shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+    return atr
+
+
 def add_technical_indicators(df: pd.DataFrame, indicator_config: Dict) -> pd.DataFrame:
     """
-    TA-Lib kullanarak teknik indikatörleri hesaplar
+    Calculate technical indicators without TA-Lib
+    
+    Supported Indicators:
+    - SMA (Simple Moving Average)
+    - EMA (Exponential Moving Average)
+    - RSI (Relative Strength Index)
+    - MACD (Moving Average Convergence Divergence)
+    - Bollinger Bands
+    - ATR (Average True Range)
     """
     df_copy = df.copy()
     
     # Ensure we have required columns
     required_cols = ['Open', 'High', 'Low', 'Close']
-    missing_cols = [col for col in required_cols if col not in df_copy.columns]
-    
-    if missing_cols:
-        for col in missing_cols:
-            if col == 'Volume':
-                df_copy[col] = 0
-            elif 'Close' in df_copy.columns:
-                df_copy[col] = df_copy['Close']
+    for col in required_cols:
+        if col not in df_copy.columns:
+            if col == 'Close' and len(df_copy.columns) > 0:
+                df_copy[col] = df_copy.iloc[:, 0]
             else:
-                raise ValueError(f"Missing required column: {col}")
+                df_copy[col] = df_copy['Close'] if 'Close' in df_copy.columns else 0
     
     # Convert to numeric
     for col in ['Open', 'High', 'Low', 'Close']:
         df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce')
     
-    # SMA
+    # SMA (Simple Moving Average)
     if indicator_config.get('sma', False):
-        df_copy['SMA_20'] = talib.SMA(df_copy['Close'], timeperiod=20)
-        df_copy['SMA_50'] = talib.SMA(df_copy['Close'], timeperiod=50)
-        df_copy['SMA_200'] = talib.SMA(df_copy['Close'], timeperiod=200)
+        df_copy['SMA_20'] = calculate_sma(df_copy['Close'], 20)
+        df_copy['SMA_50'] = calculate_sma(df_copy['Close'], 50)
+        df_copy['SMA_200'] = calculate_sma(df_copy['Close'], 200)
     
-    # EMA
+    # EMA (Exponential Moving Average)
     if indicator_config.get('ema', False):
-        df_copy['EMA_12'] = talib.EMA(df_copy['Close'], timeperiod=12)
-        df_copy['EMA_26'] = talib.EMA(df_copy['Close'], timeperiod=26)
+        df_copy['EMA_12'] = calculate_ema(df_copy['Close'], 12)
+        df_copy['EMA_26'] = calculate_ema(df_copy['Close'], 26)
     
-    # RSI
+    # RSI (Relative Strength Index)
     if indicator_config.get('rsi', False):
-        df_copy['RSI_14'] = talib.RSI(df_copy['Close'], timeperiod=14)
+        df_copy['RSI_14'] = calculate_rsi(df_copy['Close'], 14)
     
-    # MACD
+    # MACD (Moving Average Convergence Divergence)
     if indicator_config.get('macd', False):
-        macd, signal, hist = talib.MACD(
-            df_copy['Close'], 
-            fastperiod=12, 
-            slowperiod=26, 
-            signalperiod=9
-        )
+        macd, signal, hist = calculate_macd(df_copy['Close'], 12, 26, 9)
         df_copy['MACD'] = macd
         df_copy['MACD_Signal'] = signal
         df_copy['MACD_Hist'] = hist
     
     # Bollinger Bands
     if indicator_config.get('bollinger', False):
-        upper, middle, lower = talib.BBANDS(
-            df_copy['Close'], 
-            timeperiod=20, 
-            nbdevup=2, 
-            nbdevdn=2, 
-            matype=0
-        )
+        upper, middle, lower = calculate_bollinger_bands(df_copy['Close'], 20, 2)
         df_copy['BB_Upper'] = upper
         df_copy['BB_Middle'] = middle
         df_copy['BB_Lower'] = lower
     
-    # ATR
+    # ATR (Average True Range)
     if indicator_config.get('atr', False):
-        df_copy['ATR_14'] = talib.ATR(
-            df_copy['High'], 
-            df_copy['Low'], 
-            df_copy['Close'], 
-            timeperiod=14
-        )
+        df_copy['ATR_14'] = calculate_atr(df_copy['High'], df_copy['Low'], df_copy['Close'], 14)
     
     return df_copy
+
 
 def create_candlestick_with_indicators(df: pd.DataFrame, ticker: str, indicators: Dict):
     """Interactive OHLC chart with technical indicators"""
@@ -135,6 +173,14 @@ def create_candlestick_with_indicators(df: pd.DataFrame, ticker: str, indicators
             row=1, col=1
         )
     
+    # EMA
+    if 'EMA_12' in df.columns and not df['EMA_12'].isna().all():
+        fig.add_trace(
+            go.Scatter(x=df.index, y=df['EMA_12'], name='EMA 12', 
+                      line=dict(color='green', width=1.5, dash='dash')),
+            row=1, col=1
+        )
+    
     # Bollinger Bands
     if 'BB_Upper' in df.columns and not df['BB_Upper'].isna().all():
         fig.add_trace(
@@ -175,9 +221,10 @@ def create_candlestick_with_indicators(df: pd.DataFrame, ticker: str, indicators
         )
         
         # Histogram
-        colors = ['green' if val >= 0 else 'red' for val in df['MACD_Hist']]
+        hist_values = df['MACD_Hist'].fillna(0)
+        colors = ['green' if val >= 0 else 'red' for val in hist_values]
         fig.add_trace(
-            go.Bar(x=df.index, y=df['MACD_Hist'], name='Histogram', 
+            go.Bar(x=df.index, y=hist_values, name='Histogram', 
                   marker_color=colors),
             row=3, col=1
         )
